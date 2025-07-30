@@ -1,0 +1,22 @@
+{
+  "name": "cosmosdb-mcp-server",
+  "version": "1.0.0",
+  "description": "Model Context Protocol server for Azure Cosmos DB integration",
+  "main": "main.py",
+  "scripts": {
+    "start": "python main.py",
+    "install": "pip install -r requirements.txt",
+    "dev": "python main.py"
+  },
+  "keywords": ["mcp", "azure", "cosmosdb", "database", "server"],
+  "author": "Your Name",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/cosmosdb-mcp-server"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/cosmosdb-mcp-server/issues"
+  },
+  "homepage": "https://github.com/yourusername/cosmosdb-mcp-server#readme"
+}
