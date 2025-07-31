@@ -21,7 +21,9 @@ from mcp.types import (
 )
 import mcp.types as types
 from mcp.server.session import ServerSession
-from mcp.server.stdio import stdio_server
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+import uvicorn
 
 # Load environment variables
 load_dotenv()
@@ -40,16 +42,26 @@ class CosmosConfig:
     consistency_level: str = "Session"
     connection_mode: str = "Gateway"
 
+@dataclass
+class ServerConfig:
+    """Configuration for HTTP server"""
+    host: str = "localhost"
+    port: int = 8000
+    log_level: str = "info"
+
 class CosmosDBMCPServer:
     """MCP Server for Azure Cosmos DB operations"""
     
     def __init__(self):
         self.config = self._load_config()
+        self.server_config = self._load_server_config()
         self.cosmos_client: Optional[CosmosClient] = None
         self.database = None
         self.container = None
         self.server = Server("cosmosdb-mcp-server")
+        self.app = FastAPI(title="Cosmos DB MCP Server", version="1.0.0")
         self._setup_handlers()
+        self._setup_http_routes()
     
     def _load_config(self) -> CosmosConfig:
         """Load configuration from environment variables"""
@@ -58,6 +70,14 @@ class CosmosDBMCPServer:
             key=os.getenv("COSMOS_KEY", ""),
             database_name=os.getenv("COSMOS_DATABASE_NAME", ""),
             container_name=os.getenv("COSMOS_CONTAINER_NAME", ""),
+        )
+    
+    def _load_server_config(self) -> ServerConfig:
+        """Load HTTP server configuration from environment variables"""
+        return ServerConfig(
+            host=os.getenv("SERVER_HOST", "localhost"),
+            port=int(os.getenv("SERVER_PORT", "8000")),
+            log_level=os.getenv("LOG_LEVEL", "info")
         )
     
     async def _initialize_cosmos_client(self):
@@ -415,12 +435,197 @@ class CosmosDBMCPServer:
             }
             
         except Exception as e:
+                return {
+                    "error": f"Failed to get statistics: {str(e)}"
+                }
+    
+    def _setup_http_routes(self):
+        """Setup HTTP routes for the MCP server"""
+        
+        @self.app.get("/")
+        async def root():
             return {
-                "error": f"Failed to get statistics: {str(e)}"
+                "name": "Cosmos DB MCP Server",
+                "version": "1.0.0",
+                "description": "Model Context Protocol server for Azure Cosmos DB"
             }
+        
+        @self.app.get("/health")
+        async def health_check():
+            try:
+                if not self.cosmos_client:
+                    await self._initialize_cosmos_client()
+                if self.database:
+                    await self.database.read()
+                return {"status": "healthy", "database": "connected"}
+            except Exception as e:
+                return {"status": "unhealthy", "error": str(e)}
+        
+        @self.app.get("/mcp/resources")
+        async def list_resources():
+            try:
+                # Get resources directly from handler
+                resources = [
+                    {
+                        "uri": "cosmosdb://database",
+                        "name": "Database Info",
+                        "description": "Information about the connected Cosmos DB database",
+                        "mimeType": "application/json"
+                    },
+                    {
+                        "uri": "cosmosdb://container",
+                        "name": "Container Info", 
+                        "description": "Information about the connected Cosmos DB container",
+                        "mimeType": "application/json"
+                    },
+                    {
+                        "uri": "cosmosdb://documents",
+                        "name": "Documents",
+                        "description": "Access to documents in the container",
+                        "mimeType": "application/json"
+                    }
+                ]
+                return {"resources": resources}
+            except Exception as e:
+                return JSONResponse(content={"error": str(e)}, status_code=500)
+        
+        @self.app.get("/mcp/resources/{resource_path:path}")
+        async def read_resource(resource_path: str):
+            try:
+                if not self.cosmos_client:
+                    await self._initialize_cosmos_client()
+                
+                if not self.database or not self.container:
+                    raise RuntimeError("Database or container not initialized")
+                
+                uri_str = f"cosmosdb://{resource_path}"
+                if uri_str == "cosmosdb://database":
+                    db_info = await self.database.read()
+                    content = f"Database: {db_info['id']}\nCreated: {db_info.get('_ts', 'N/A')}"
+                elif uri_str == "cosmosdb://container":
+                    container_info = await self.container.read()
+                    content = f"Container: {container_info['id']}\nPartition Key: {container_info.get('partitionKey', 'N/A')}"
+                elif uri_str == "cosmosdb://documents":
+                    items = []
+                    async for item in self.container.query_items(query="SELECT TOP 10 * FROM c"):
+                        items.append(item)
+                    content = f"Sample documents (first 10):\n{items}"
+                else:
+                    raise ValueError(f"Unknown resource URI: {uri_str}")
+                
+                return {"content": content}
+            except Exception as e:
+                return JSONResponse(content={"error": str(e)}, status_code=500)
+        
+        @self.app.get("/mcp/tools")
+        async def list_tools():
+            try:
+                tools = [
+                    {
+                        "name": "query_documents",
+                        "description": "Execute a SQL query against Cosmos DB documents",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "query": {"type": "string", "description": "SQL query to execute"},
+                                "parameters": {"type": "array", "items": {"type": "object"}, "description": "Optional query parameters"},
+                                "cross_partition": {"type": "boolean", "description": "Enable cross-partition query", "default": True}
+                            },
+                            "required": ["query"]
+                        }
+                    },
+                    {
+                        "name": "create_document",
+                        "description": "Create a new document in Cosmos DB",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "document": {"type": "object", "description": "Document to create"},
+                                "partition_key": {"type": "string", "description": "Partition key value (if different from id)"}
+                            },
+                            "required": ["document"]
+                        }
+                    },
+                    {
+                        "name": "read_document",
+                        "description": "Read a specific document by ID",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "document_id": {"type": "string", "description": "Document ID to read"},
+                                "partition_key": {"type": "string", "description": "Partition key value"}
+                            },
+                            "required": ["document_id", "partition_key"]
+                        }
+                    },
+                    {
+                        "name": "update_document",
+                        "description": "Update an existing document",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "document_id": {"type": "string", "description": "Document ID to update"},
+                                "document": {"type": "object", "description": "Updated document data"},
+                                "partition_key": {"type": "string", "description": "Partition key value"}
+                            },
+                            "required": ["document_id", "document", "partition_key"]
+                        }
+                    },
+                    {
+                        "name": "delete_document",
+                        "description": "Delete a document by ID",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "document_id": {"type": "string", "description": "Document ID to delete"},
+                                "partition_key": {"type": "string", "description": "Partition key value"}
+                            },
+                            "required": ["document_id", "partition_key"]
+                        }
+                    },
+                    {
+                        "name": "get_container_statistics",
+                        "description": "Get statistics about the container",
+                        "inputSchema": {"type": "object", "properties": {}, "required": []}
+                    }
+                ]
+                return {"tools": tools}
+            except Exception as e:
+                return JSONResponse(content={"error": str(e)}, status_code=500)
+        
+        @self.app.post("/mcp/tools/{tool_name}")
+        async def call_tool(tool_name: str, request: Request):
+            try:
+                body = await request.json()
+                arguments = body.get("arguments", {})
+                
+                if not self.cosmos_client:
+                    await self._initialize_cosmos_client()
+                
+                if tool_name == "query_documents":
+                    result = await self._query_documents(arguments)
+                elif tool_name == "create_document":
+                    result = await self._create_document(arguments)
+                elif tool_name == "read_document":
+                    result = await self._read_document(arguments)
+                elif tool_name == "update_document":
+                    result = await self._update_document(arguments)
+                elif tool_name == "delete_document":
+                    result = await self._delete_document(arguments)
+                elif tool_name == "get_container_statistics":
+                    result = await self._get_container_statistics()
+                else:
+                    raise ValueError(f"Unknown tool: {tool_name}")
+                
+                return {"result": [{"type": "text", "text": str(result)}]}
+                
+            except Exception as e:
+                error_msg = f"Error executing {tool_name}: {str(e)}"
+                logger.error(error_msg)
+                return JSONResponse(content={"error": error_msg}, status_code=500)
     
     async def run(self):
-        """Run the MCP server"""
+        """Run the HTTP MCP server"""
         # Validate configuration
         if not all([self.config.endpoint, self.config.key, self.config.database_name, self.config.container_name]):
             raise ValueError("Missing required Cosmos DB configuration. Please check your environment variables.")
@@ -428,20 +633,16 @@ class CosmosDBMCPServer:
         # Initialize Cosmos DB connection
         await self._initialize_cosmos_client()
         
-        # Run the server
-        async with stdio_server() as (read_stream, write_stream):
-            await self.server.run(
-                read_stream,
-                write_stream,
-                InitializationOptions(
-                    server_name="cosmosdb-mcp-server",
-                    server_version="1.0.0",
-                    capabilities=self.server.get_capabilities(
-                        notification_options=NotificationOptions(),
-                        experimental_capabilities={}
-                    )
-                )
-            )
+        # Start the HTTP server
+        config = uvicorn.Config(
+            app=self.app,
+            host=self.server_config.host,
+            port=self.server_config.port,
+            log_level=self.server_config.log_level,
+            loop="asyncio"
+        )
+        server = uvicorn.Server(config)
+        await server.serve()
 
 async def main():
     """Main entry point"""

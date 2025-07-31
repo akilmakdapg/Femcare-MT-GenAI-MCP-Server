@@ -5,8 +5,10 @@
   "main": "main.py",
   "scripts": {
     "start": "python main.py",
+    "start:http": "python main.py",
     "install": "pip install -r requirements.txt",
-    "dev": "python main.py"
+    "dev": "python main.py",
+    "test": "python test_http_server.py"
   },
   "keywords": ["mcp", "azure", "cosmosdb", "database", "server"],
   "author": "Your Name",

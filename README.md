@@ -1,6 +1,6 @@
 # Azure Cosmos DB MCP Server
 
-A Model Context Protocol (MCP) server that provides seamless integration with Azure Cosmos DB. This server enables AI assistants and other MCP clients to interact with Cosmos DB databases through a standardized interface.
+A Model Context Protocol (MCP) server that provides seamless integration with Azure Cosmos DB. This server enables AI assistants and other MCP clients to interact with Cosmos DB databases through both **stdio** (command-line) and **HTTP** interfaces.
 
 ## Features
 
@@ -10,6 +10,8 @@ A Model Context Protocol (MCP) server that provides seamless integration with Az
 - **Statistics**: Get container statistics and metadata
 - **Cross-partition Support**: Execute queries across multiple partitions
 - **Async Operations**: Built with asyncio for high performance
+- **HTTP API**: RESTful HTTP interface for web integration
+- **Health Monitoring**: Built-in health check endpoints
 
 ## Prerequisites
 
@@ -22,7 +24,7 @@ A Model Context Protocol (MCP) server that provides seamless integration with Az
 1. Clone this repository:
 ```bash
 git clone <repository-url>
-cd automatic_report_generation
+cd Femcare-MT-GenAI-MCP-Server
 ```
 
 2. Install dependencies:
@@ -37,10 +39,56 @@ cp .env.example .env
 
 4. Edit `.env` file with your Cosmos DB credentials:
 ```env
+# Azure Cosmos DB Configuration
 COSMOS_ENDPOINT=https://your-account.documents.azure.com:443/
 COSMOS_KEY=your-primary-key
 COSMOS_DATABASE_NAME=your-database-name
 COSMOS_CONTAINER_NAME=your-container-name
+
+# HTTP Server Configuration (for HTTP mode)
+SERVER_HOST=localhost
+SERVER_PORT=8000
+LOG_LEVEL=info
+```
+
+## Usage
+
+### HTTP Mode (Recommended for Web Integration)
+
+Start the HTTP server:
+```bash
+python main.py
+```
+
+The server will start on `http://localhost:8000` by default.
+
+#### HTTP API Endpoints
+
+- **GET /** - Server information
+- **GET /health** - Health check endpoint
+- **GET /mcp/resources** - List available resources
+- **GET /mcp/resources/{resource_path}** - Read specific resource
+- **GET /mcp/tools** - List available tools
+- **POST /mcp/tools/{tool_name}** - Execute a tool
+
+#### Example HTTP Usage
+
+```bash
+# Check server health
+curl http://localhost:8000/health
+
+# List available tools
+curl http://localhost:8000/mcp/tools
+
+# Query documents
+curl -X POST http://localhost:8000/mcp/tools/query_documents \
+  -H "Content-Type: application/json" \
+  -d '{"arguments": {"query": "SELECT * FROM c WHERE c.category = \"example\""}}'
+
+# Create a document
+curl -X POST http://localhost:8000/mcp/tools/create_document \
+  -H "Content-Type: application/json" \
+  -d '{"arguments": {"document": {"id": "doc1", "name": "Test Document", "category": "example"}}}'
 ```
 
 ## Configuration
