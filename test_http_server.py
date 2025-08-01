@@ -42,7 +42,7 @@ async def test_server():
             print("\nTesting query documents tool...")
             query_data = {
                 "arguments": {
-                    "query": "SELECT TOP 5 * FROM c"
+                    "query": "SELECT * FROM c"
                 }
             }
             async with session.post(

@@ -1,11 +1,10 @@
 import os
 import asyncio
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Optional
 from dataclasses import dataclass
 
 from azure.cosmos.aio import CosmosClient
-from azure.cosmos import PartitionKey, exceptions
 from dotenv import load_dotenv
 from pydantic import AnyUrl
 
@@ -14,10 +13,7 @@ from mcp.server import NotificationOptions, Server
 from mcp.types import (
     Resource,
     Tool,
-    TextContent,
-    ImageContent,
-    EmbeddedResource,
-    LoggingLevel
+    TextContent
 )
 import mcp.types as types
 from mcp.server.session import ServerSession
@@ -188,24 +184,6 @@ class CosmosDBMCPServer:
                     }
                 ),
                 Tool(
-                    name="create_document",
-                    description="Create a new document in Cosmos DB",
-                    inputSchema={
-                        "type": "object",
-                        "properties": {
-                            "document": {
-                                "type": "object",
-                                "description": "Document to create"
-                            },
-                            "partition_key": {
-                                "type": "string",
-                                "description": "Partition key value (if different from id)"
-                            }
-                        },
-                        "required": ["document"]
-                    }
-                ),
-                Tool(
                     name="read_document",
                     description="Read a specific document by ID",
                     inputSchema={
@@ -222,47 +200,7 @@ class CosmosDBMCPServer:
                         },
                         "required": ["document_id", "partition_key"]
                     }
-                ),
-                Tool(
-                    name="update_document",
-                    description="Update an existing document",
-                    inputSchema={
-                        "type": "object",
-                        "properties": {
-                            "document_id": {
-                                "type": "string",
-                                "description": "Document ID to update"
-                            },
-                            "document": {
-                                "type": "object",
-                                "description": "Updated document data"
-                            },
-                            "partition_key": {
-                                "type": "string",
-                                "description": "Partition key value"
-                            }
-                        },
-                        "required": ["document_id", "document", "partition_key"]
-                    }
-                ),
-                Tool(
-                    name="delete_document",
-                    description="Delete a document by ID",
-                    inputSchema={
-                        "type": "object",
-                        "properties": {
-                            "document_id": {
-                                "type": "string",
-                                "description": "Document ID to delete"
-                            },
-                            "partition_key": {
-                                "type": "string",
-                                "description": "Partition key value"
-                            }
-                        },
-                        "required": ["document_id", "partition_key"]
-                    }
-                ),
+                ),             
                 Tool(
                     name="get_container_statistics",
                     description="Get statistics about the container",
@@ -283,14 +221,8 @@ class CosmosDBMCPServer:
             try:
                 if name == "query_documents":
                     result = await self._query_documents(arguments)
-                elif name == "create_document":
-                    result = await self._create_document(arguments)
                 elif name == "read_document":
                     result = await self._read_document(arguments)
-                elif name == "update_document":
-                    result = await self._update_document(arguments)
-                elif name == "delete_document":
-                    result = await self._delete_document(arguments)
                 elif name == "get_container_statistics":
                     result = await self._get_container_statistics()
                 else:
@@ -324,30 +256,7 @@ class CosmosDBMCPServer:
             "result_count": len(items),
             "documents": items
         }
-    
-    async def _create_document(self, arguments: dict) -> dict:
-        """Create a new document"""
-        if not self.container:
-            raise RuntimeError("Container not initialized")
-            
-        document = arguments["document"]
-        partition_key = arguments.get("partition_key")
         
-        if "id" not in document:
-            import uuid
-            document["id"] = str(uuid.uuid4())
-        
-        created_item = await self.container.create_item(
-            body=document,
-            partition_key=partition_key
-        )
-        
-        return {
-            "status": "created",
-            "document_id": created_item["id"],
-            "document": created_item
-        }
-    
     async def _read_document(self, arguments: dict) -> dict:
         """Read a document by ID"""
         if not self.container:
@@ -365,48 +274,7 @@ class CosmosDBMCPServer:
             "status": "found",
             "document": document
         }
-    
-    async def _update_document(self, arguments: dict) -> dict:
-        """Update an existing document"""
-        if not self.container:
-            raise RuntimeError("Container not initialized")
-            
-        document_id = arguments["document_id"]
-        document = arguments["document"]
-        partition_key = arguments["partition_key"]
         
-        # Ensure the document has the correct ID
-        document["id"] = document_id
-        
-        updated_item = await self.container.replace_item(
-            item=document_id,
-            body=document,
-            partition_key=partition_key
-        )
-        
-        return {
-            "status": "updated",
-            "document": updated_item
-        }
-    
-    async def _delete_document(self, arguments: dict) -> dict:
-        """Delete a document by ID"""
-        if not self.container:
-            raise RuntimeError("Container not initialized")
-            
-        document_id = arguments["document_id"]
-        partition_key = arguments["partition_key"]
-        
-        await self.container.delete_item(
-            item=document_id,
-            partition_key=partition_key
-        )
-        
-        return {
-            "status": "deleted",
-            "document_id": document_id
-        }
-    
     async def _get_container_statistics(self) -> dict:
         """Get container statistics"""
         if not self.container:
@@ -533,19 +401,7 @@ class CosmosDBMCPServer:
                             },
                             "required": ["query"]
                         }
-                    },
-                    {
-                        "name": "create_document",
-                        "description": "Create a new document in Cosmos DB",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "document": {"type": "object", "description": "Document to create"},
-                                "partition_key": {"type": "string", "description": "Partition key value (if different from id)"}
-                            },
-                            "required": ["document"]
-                        }
-                    },
+                    },                    
                     {
                         "name": "read_document",
                         "description": "Read a specific document by ID",
@@ -553,31 +409,6 @@ class CosmosDBMCPServer:
                             "type": "object",
                             "properties": {
                                 "document_id": {"type": "string", "description": "Document ID to read"},
-                                "partition_key": {"type": "string", "description": "Partition key value"}
-                            },
-                            "required": ["document_id", "partition_key"]
-                        }
-                    },
-                    {
-                        "name": "update_document",
-                        "description": "Update an existing document",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "document_id": {"type": "string", "description": "Document ID to update"},
-                                "document": {"type": "object", "description": "Updated document data"},
-                                "partition_key": {"type": "string", "description": "Partition key value"}
-                            },
-                            "required": ["document_id", "document", "partition_key"]
-                        }
-                    },
-                    {
-                        "name": "delete_document",
-                        "description": "Delete a document by ID",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "document_id": {"type": "string", "description": "Document ID to delete"},
                                 "partition_key": {"type": "string", "description": "Partition key value"}
                             },
                             "required": ["document_id", "partition_key"]
@@ -604,14 +435,8 @@ class CosmosDBMCPServer:
                 
                 if tool_name == "query_documents":
                     result = await self._query_documents(arguments)
-                elif tool_name == "create_document":
-                    result = await self._create_document(arguments)
                 elif tool_name == "read_document":
                     result = await self._read_document(arguments)
-                elif tool_name == "update_document":
-                    result = await self._update_document(arguments)
-                elif tool_name == "delete_document":
-                    result = await self._delete_document(arguments)
                 elif tool_name == "get_container_statistics":
                     result = await self._get_container_statistics()
                 else:
